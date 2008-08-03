@@ -1,4 +1,4 @@
 #!/bin/sh
 
-gcc -O3 -Wall -shared -o libval_limit.so -I/usr/include/mysql -fPIC val_limit.cc 2>&1
+g++ -O3 -Wall -fPIC -shared -o libval_limit.so -I/usr/include/mysql val_limit.cc 2>&1
 
