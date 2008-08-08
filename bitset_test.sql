@@ -12,6 +12,9 @@ create function bitset_and returns string soname 'libudf_bitset.so';
 create function bitset_create returns string soname 'libudf_bitset.so';
 create function bitset_intersects returns integer soname 'libudf_bitset.so';
 
+drop temporary table if exists ag_bitsets;
+create temporary table ag_bitsets as select album_id, bitset_aggregate(genre_id, 22) bs from AlbumGenre group by album_id;
+
 set @bsa = bitset_create(1,2,3);
 set @bsb = bitset_create(3,4,5);
 select hex(@bsa), hex(@bsb), hex(bitset_and(@bsa, @bsa));

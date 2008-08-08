@@ -45,6 +45,12 @@
 #define CHUNK_SIZE 8
 #define MAX_SIZE 128
 
+#ifdef DEBUG
+#define dfprintf fprintf
+#else
+#define dfprintf(...) ;
+#endif
+
 typedef struct bitset
 {
   size_t len;
@@ -113,10 +119,10 @@ static bitset_t *bitset_new(size_t initial_len, size_t max_len)
 
 static void bitset_free(bitset_t *bs)
 {
-  fprintf(stderr, "in bitset_free");
+  dfprintf(stderr, "in bitset_free");
   if (bs->data)
   {
-    fprintf(stderr, "freeing bs data\n");
+    dfprintf(stderr, "freeing bs data\n");
     free(bs->data);
     bs->data = NULL;
   }
@@ -126,7 +132,7 @@ static void bitset_free(bitset_t *bs)
 
 static void bitset_clear(bitset_t *bs)
 {
-  fprintf(stderr, "bitset_clear");
+  dfprintf(stderr, "bitset_clear");
   bzero(bs->data, bs->len);
 }
 
@@ -134,14 +140,14 @@ static my_bool bitset_ensure_len(bitset_t *bs, size_t len)
 {
   if (len > bs->max_len)
   {
-    fprintf(stderr, "byte is too big!\n");
+    dfprintf(stderr, "byte is too big!\n");
     return false; // too high
   }
 
   // Check for resize
   if (len > bs->len)
   {
-    fprintf(stderr, "Resizing - cur len is %d and need len %d\n", (int)bs->len, (int)len);
+    dfprintf(stderr, "Resizing - cur len is %d and need len %d\n", (int)bs->len, (int)len);
     size_t new_size;
     size_t chunk_mod = len % CHUNK_SIZE;
     if (chunk_mod == 0)
@@ -165,12 +171,12 @@ static void bitset_set(bitset_t *bs, size_t bit) {
   if (bs->data == NULL)
     return; // a previous realloc failed
 
-  fprintf(stderr, "Bit: %d\n", (int)bit);
+  dfprintf(stderr, "Bit: %d\n", (int)bit);
 
   size_t byte = bit/8;
   size_t bit_in_byte = bit % 8;
 
-  fprintf(stderr, "Byte: %d\tbib: %d\n", (int)byte, (int)bit_in_byte);
+  dfprintf(stderr, "Byte: %d\tbib: %d\n", (int)byte, (int)bit_in_byte);
 
   if (!bitset_ensure_len(bs, byte + 1))
     return;
@@ -182,7 +188,7 @@ static void bitset_or_data(bitset_t *bs, char *data, size_t datalen) {
   if (!bitset_ensure_len(bs, datalen))
     return;
 
-  fprintf(stderr, "Orring bs len %d with len %d\n", (int)bs->len, (int)datalen);
+  dfprintf(stderr, "Orring bs len %d with len %d\n", (int)bs->len, (int)datalen);
 
   for (uint i = 0; i < datalen; i++)
   {
@@ -194,13 +200,13 @@ static void bitset_and_data(bitset_t *bs, char *data, size_t datalen) {
   if (!bitset_ensure_len(bs, datalen))
     return;
 
-  fprintf(stderr, "Anding bs len %d with len %d\n", (int)bs->len, (int)datalen);
+  dfprintf(stderr, "Anding bs len %d with len %d\n", (int)bs->len, (int)datalen);
 
   for (uint i = 0; i < datalen; i++)
   {
-    fprintf(stderr, "anding byte: %d with %d\n", (int)bs->data[i], (int)data[i]);
+    dfprintf(stderr, "anding byte: %d with %d\n", (int)bs->data[i], (int)data[i]);
     bs->data[i] &= data[i];
-    fprintf(stderr, "got byte: %d\n", (int)bs->data[i]);
+    dfprintf(stderr, "got byte: %d\n", (int)bs->data[i]);
   }
 }
 
