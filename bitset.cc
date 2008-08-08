@@ -75,6 +75,13 @@ extern "C" {
                    char *result, unsigned long *length,
                    char *is_null, char *message);
 
+
+  my_bool bitset_create_init(UDF_INIT *initid, UDF_ARGS *args, char *message);
+  void bitset_create_deinit(UDF_INIT *initid);
+  char *bitset_create(UDF_INIT *initid, UDF_ARGS *args,
+                      char *result, unsigned long *length,
+                      char *is_null, char *message);
+
 }
 
 
@@ -166,6 +173,8 @@ static void bitset_or_data(bitset_t *bs, char *data, size_t datalen) {
   if (!bitset_ensure_len(bs, datalen))
     return;
 
+  fprintf(stderr, "Orring bs len %d with len %d\n", (int)bs->len, (int)datalen);
+
   for (uint i = 0; i < datalen; i++)
   {
     bs->data[i] |= data[i];
@@ -176,9 +185,13 @@ static void bitset_and_data(bitset_t *bs, char *data, size_t datalen) {
   if (!bitset_ensure_len(bs, datalen))
     return;
 
+  fprintf(stderr, "Anding bs len %d with len %d\n", (int)bs->len, (int)datalen);
+
   for (uint i = 0; i < datalen; i++)
   {
+    fprintf(stderr, "anding byte: %d with %d\n", (int)bs->data[i], (int)data[i]);
     bs->data[i] &= data[i];
+    fprintf(stderr, "got byte: %d\n", (int)bs->data[i]);
   }
 }
 
@@ -396,7 +409,8 @@ char *bitset_or(UDF_INIT *initid, UDF_ARGS *args,
   bitset_t *bs = bitset_new(*length, *length);
   for (uint i = 0; i < args->arg_count; i++)
   {
-    bitset_or_data(bs, args->args[i], args->lengths[i]);
+    if (args->args[i] != NULL)
+      bitset_or_data(bs, args->args[i], args->lengths[i]);
   }
 
   return bitset_op_result(initid, bs, length, result);
@@ -413,11 +427,75 @@ char *bitset_and(UDF_INIT *initid, UDF_ARGS *args,
 
   /* now allocate the bitset */
   bitset_t *bs = bitset_new(*length, *length);
-  for (uint i = 0; i < args->arg_count; i++)
+  bitset_or_data(bs, args->args[0], args->lengths[0]);
+
+  for (uint i = 1; i < args->arg_count; i++)
   {
-    bitset_and_data(bs, args->args[i], args->lengths[i]);
+    if (args->args[i] != NULL)
+      bitset_and_data(bs, args->args[i], args->lengths[i]);
   }
 
   return bitset_op_result(initid, bs, length, result);
 }
 
+
+/************************************************************/
+
+my_bool bitset_create_init(UDF_INIT *initid, UDF_ARGS *args, char *message)
+{
+  if (args->arg_count == 0)
+  {
+    strmov(message, "BITSET_CREATE takes at least one argument");
+    return 1;
+  }
+  for (uint i = 0; i < args->arg_count; i++)
+  {
+    if (args->arg_type[i] != INT_RESULT)
+    {
+      strmov(message, "BITSET_CREATE must take only integer arguments");
+      return 1;
+    }
+  }
+
+  initid->maybe_null = 1;
+  initid->max_length = MAX_SIZE;
+  return 0;
+}
+
+char *bitset_create(UDF_INIT *initid, UDF_ARGS *args,
+                    char *result, unsigned long *length,
+                    char *is_null, char *message)
+{
+  uint maxbit = 0;
+  *is_null = 1;
+  for (uint i = 0; i < args->arg_count; i++)
+  {
+    if (args->args[i] == NULL)
+      continue;
+    longlong bit = *((longlong *)args->args[i]);
+    if (bit > maxbit)
+      maxbit = bit;
+    *is_null = 0;
+  }
+
+  if (*is_null)
+    return NULL;
+
+  *length = (maxbit / 8) + 1;
+  bitset_t *bs = bitset_new(*length, *length);
+  for (uint i = 0; i < args->arg_count; i++)
+  {
+    if (args->args[i] == NULL) continue;
+    longlong bit = *((longlong *)args->args[i]);
+    if (bit < 0)
+      continue; /* TODO: warning? */
+    bitset_set(bs, bit);
+  }
+
+  return bitset_op_result(initid, bs, length, result);
+}
+
+void bitset_create_deinit(UDF_INIT *initid)
+{
+  bitset_op_deinit(initid);
+}
