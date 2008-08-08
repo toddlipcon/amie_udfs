@@ -10,6 +10,14 @@
  *     returns the bitwise and of the two arguments
  *  BITSET_CREATE(ints...)
  *     returns a new bitset with the given integers set
+ *
+ *  create aggregate function  bitset_aggregate returns string soname 'libudf_bitset.so';
+ *  create function bitset_or returns string soname 'libudf_bitset.so';
+ *  create function bitset_and returns string soname 'libudf_bitset.so';
+ *
+ *  drop function bitset_aggregate;
+ *  drop function bitset_or;
+ *  drop function bitset_and;
  */
 
 #ifdef STANDARD
@@ -60,6 +68,12 @@ extern "C" {
   char *bitset_or(UDF_INIT *initid, UDF_ARGS *args,
                   char *result, unsigned long *length,
                   char *is_null, char *message);
+
+  my_bool bitset_and_init(UDF_INIT *initid, UDF_ARGS *args, char *message);
+  void bitset_and_deinit(UDF_INIT *initid);
+  char *bitset_and(UDF_INIT *initid, UDF_ARGS *args,
+                   char *result, unsigned long *length,
+                   char *is_null, char *message);
 
 }
 
@@ -148,13 +162,23 @@ static void bitset_set(bitset_t *bs, size_t bit) {
   bs->data[byte] |= 1 << bit_in_byte;
 }
 
-static void bitset_merge_data(bitset_t *bs, char *data, size_t datalen) {
+static void bitset_or_data(bitset_t *bs, char *data, size_t datalen) {
   if (!bitset_ensure_len(bs, datalen))
     return;
 
   for (uint i = 0; i < datalen; i++)
   {
     bs->data[i] |= data[i];
+  }
+}
+
+static void bitset_and_data(bitset_t *bs, char *data, size_t datalen) {
+  if (!bitset_ensure_len(bs, datalen))
+    return;
+
+  for (uint i = 0; i < datalen; i++)
+  {
+    bs->data[i] &= data[i];
   }
 }
 
@@ -268,14 +292,13 @@ char *bitset_aggregate(UDF_INIT *initid, UDF_ARGS *args,
 }
 
 /************************************************************/
-
-my_bool bitset_or_init(UDF_INIT *initid, UDF_ARGS *args, char *message)
+static my_bool bitset_op_init(UDF_INIT *initid, UDF_ARGS *args, char *message)
 {
   uint i, max_length=0;
 
   if (args->arg_count < 2)
   {
-    strmov(message, "BITSET_OR requires at least two arguments");
+    strmov(message, "BITSET_* operation requires at least two arguments");
     return 1;
   }
 
@@ -283,7 +306,7 @@ my_bool bitset_or_init(UDF_INIT *initid, UDF_ARGS *args, char *message)
   {
     if (args->arg_type[1] != STRING_RESULT)
     {
-      strmov(message, "BITSET_OR arguments must be BINARY");
+      strmov(message, "BITSET_* operation arguments must be BINARY");
       return 1;
     }
 
@@ -296,7 +319,17 @@ my_bool bitset_or_init(UDF_INIT *initid, UDF_ARGS *args, char *message)
   return 0;
 }
 
-void bitset_or_deinit(UDF_INIT *initid)
+my_bool bitset_or_init(UDF_INIT *initid, UDF_ARGS *args, char *message)
+{
+  return bitset_op_init(initid, args, message);
+}
+
+my_bool bitset_and_init(UDF_INIT *initid, UDF_ARGS *args, char *message)
+{
+  return bitset_op_init(initid, args, message);
+}
+
+void bitset_op_deinit(UDF_INIT *initid)
 {
   bitset_t *bs = (bitset_t *)initid->ptr;
   if (bs)
@@ -306,40 +339,38 @@ void bitset_or_deinit(UDF_INIT *initid)
   }
 }
 
-char *bitset_or(UDF_INIT *initid, UDF_ARGS *args,
-                char *result, unsigned long *length,
-                char *is_null, char *message)
+void bitset_or_deinit(UDF_INIT *initid)
 {
-  /* first determine length and whether it should be null */
+  bitset_op_deinit(initid);
+}
 
-  uint max_len = 0;
+void bitset_and_deinit(UDF_INIT *initid)
+{
+  bitset_op_deinit(initid);
+}
+
+
+static void bitset_op_checkargs(UDF_ARGS *args, char *is_null, unsigned long *max_len)
+{
+  *max_len = 0;
   *is_null = 1;
   for (uint i = 0; i < args->arg_count; i++)
   {
     if (args->args[i] == NULL)
       continue;
     *is_null = 0;
-    if (args->lengths[i] > max_len)
-      max_len = args->lengths[i];
+    if (args->lengths[i] > *max_len)
+      *max_len = args->lengths[i];
   }
 
-  if (*is_null)
-  {
-    return NULL;
-  }
+}
 
-  /* now allocate the bitset */
-  bitset_t *bs = bitset_new(max_len, max_len);
-  for (uint i = 0; i < args->arg_count; i++)
-  {
-    bitset_merge_data(bs, args->args[i], args->lengths[i]);
-  }
-
-  *length = max_len;
-  if (max_len < 255)
+static char *bitset_op_result(UDF_INIT *initid, bitset_t *bs, unsigned long *length, char *result)
+{
+  if (*length < 255)
   {
     /* result buffer mysql provides is 255 long */
-    memcpy(result, bs->data, max_len);
+    memcpy(result, bs->data, *length);
     bitset_free(bs);
     return result;
 
@@ -348,6 +379,45 @@ char *bitset_or(UDF_INIT *initid, UDF_ARGS *args,
 
     return (char *)bs->data;
   }
+}
 
+
+char *bitset_or(UDF_INIT *initid, UDF_ARGS *args,
+                char *result, unsigned long *length,
+                char *is_null, char *message)
+{
+  /* first determine length and whether it should be null */
+  bitset_op_checkargs(args, is_null, length);
+  if (*is_null)
+    return NULL;
+
+
+  /* now allocate the bitset */
+  bitset_t *bs = bitset_new(*length, *length);
+  for (uint i = 0; i < args->arg_count; i++)
+  {
+    bitset_or_data(bs, args->args[i], args->lengths[i]);
+  }
+
+  return bitset_op_result(initid, bs, length, result);
+}
+
+char *bitset_and(UDF_INIT *initid, UDF_ARGS *args,
+                 char *result, unsigned long *length,
+                 char *is_null, char *message)
+{
+  /* first determine length and whether it should be null */
+  bitset_op_checkargs(args, is_null, length);
+  if (*is_null)
+    return NULL;
+
+  /* now allocate the bitset */
+  bitset_t *bs = bitset_new(*length, *length);
+  for (uint i = 0; i < args->arg_count; i++)
+  {
+    bitset_and_data(bs, args->args[i], args->lengths[i]);
+  }
+
+  return bitset_op_result(initid, bs, length, result);
 }
 
