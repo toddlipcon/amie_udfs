@@ -4,12 +4,14 @@
  *     returns a bitstring with those integer bits set
  *
  * Non-aggregate functions:
- *  BITSET_OR(bitset a, bitset b)
+ *  BITSET_OR(bitset a, bitset b, ...)
  *     returns the bitwise or of the two arguments
- *  BITSET_AND(bitset a, bitset b)
+ *  BITSET_AND(bitset a, bitset b, ...)
  *     returns the bitwise and of the two arguments
  *  BITSET_CREATE(ints...)
  *     returns a new bitset with the given integers set
+ *  BITSET_INTERSECTS(bitset a, bitset_b)
+ *     returns true if the two bitsets intersect (i.e. a & b is nonzero)
  *
  *  create aggregate function  bitset_aggregate returns string soname 'libudf_bitset.so';
  *  create function bitset_or returns string soname 'libudf_bitset.so';
@@ -74,6 +76,12 @@ extern "C" {
   char *bitset_and(UDF_INIT *initid, UDF_ARGS *args,
                    char *result, unsigned long *length,
                    char *is_null, char *message);
+
+
+  my_bool bitset_intersects_init(UDF_INIT *initid, UDF_ARGS *args, char *message);
+  void bitset_intersects_deinit(UDF_INIT *initid);
+  longlong bitset_intersects(UDF_INIT *initid, UDF_ARGS *args,
+                             char *is_null, char *message);
 
 
   my_bool bitset_create_init(UDF_INIT *initid, UDF_ARGS *args, char *message);
@@ -500,3 +508,62 @@ void bitset_create_deinit(UDF_INIT *initid)
 {
   bitset_op_deinit(initid);
 }
+
+/************************************************************/
+
+/**
+ *  BITSET_INTERSECTS(bitset a, bitset_b)
+ *     returns true if the two bitsets intersect (i.e. a & b is nonzero)
+ */
+my_bool bitset_intersects_init(UDF_INIT *initid, UDF_ARGS *args, char *message)
+{
+  if (args->arg_count != 2)
+  {
+    strmov(message, "usage: BITSET_INTERSECTS(bitset_a, bitset_b)");
+    return 1;
+  }
+
+  if (args->arg_type[0] != STRING_RESULT ||
+      args->arg_type[1] != STRING_RESULT)
+  {
+    strmov(message, "Arguments to BITSET_INTERSECTS must be binary");
+    return 1;
+  }
+
+  return 0;
+}
+
+
+void bitset_intersects_deinit(UDF_INIT *initid)
+{
+}
+
+longlong bitset_intersects(UDF_INIT *initid, UDF_ARGS *args,
+                           char *is_null, char *message)
+{
+  if (args->args[0] == NULL ||
+      args->args[1] == NULL)
+  {
+    *is_null = 1;
+    return 0;
+  }
+
+  uint shorter, longer;
+  if (args->lengths[0] > args->lengths[1])
+  {
+    longer = 0; shorter = 1;
+  } else {
+    longer = 1; shorter = 0;
+  }
+
+  for (uint byte = 0; byte < args->lengths[shorter]; byte++)
+  {
+    if (args->args[shorter][byte] & args->args[longer][byte])
+    {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
