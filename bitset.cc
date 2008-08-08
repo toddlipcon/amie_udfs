@@ -113,6 +113,7 @@ static void bitset_free(bitset_t *bs)
     bs->data = NULL;
   }
   bs->len = 0;
+  free(bs);
 }
 
 static void bitset_clear(bitset_t *bs)
